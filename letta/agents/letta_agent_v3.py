@@ -1,5 +1,4 @@
 import asyncio
-import json
 import uuid
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -58,7 +57,7 @@ from letta.schemas.letta_message_content import (
 from letta.schemas.letta_request import ClientSkillSchema, ClientToolSchema
 from letta.schemas.letta_response import LettaResponse, TurnTokenData
 from letta.schemas.letta_stop_reason import LettaStopReason, StopReasonType
-from letta.schemas.message import Message, MessageCreate, ToolReturn
+from letta.schemas.message import Message, MessageCreate, ToolReturn, extract_compaction_stats_from_summary_metadata
 from letta.schemas.openai.chat_completion_response import ChoiceLogprobs, ToolCall, ToolCallDenial, UsageStatistics
 from letta.schemas.provider_trace import BillingContext
 from letta.schemas.step import StepProgression
@@ -96,25 +95,18 @@ def extract_compaction_stats_from_message(message: Message) -> CompactionStats |
     """
     try:
         if message.content and len(message.content) == 1:
-            if isinstance(message.content[0], OpenAICompactionContent) and message.name:
-                metadata = json.loads(message.name)
-                raw_stats = metadata.get("compaction_stats")
-                if raw_stats:
-                    return CompactionStats(**raw_stats)
-            text_content = message.content[0].text
-            return extract_compaction_stats_from_packed_json(text_content)
+            content = message.content[0]
+            if isinstance(content, TextContent):
+                return extract_compaction_stats_from_packed_json(content.text)
+            return extract_compaction_stats_from_summary_metadata(message.name)
         if message.content and any(isinstance(content, OpenAICompactionContent) for content in message.content):
             for content in message.content:
                 if isinstance(content, TextContent):
                     stats = extract_compaction_stats_from_packed_json(content.text)
                     if stats is not None:
                         return stats
-            if message.name:
-                metadata = json.loads(message.name)
-                raw_stats = metadata.get("compaction_stats")
-                if raw_stats:
-                    return CompactionStats(**raw_stats)
-    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+            return extract_compaction_stats_from_summary_metadata(message.name)
+    except (AttributeError, TypeError, ValueError):
         pass
     return None
 

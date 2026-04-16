@@ -38,16 +38,16 @@ async def _resolve_api_key(actor: User, llm_config: LLMConfig) -> str:
         api_key, _, _ = await client.get_byok_overrides_async(llm_config)
         if api_key:
             return api_key
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"Failed to resolve OpenAI BYOK override for compact mode: {type(exc).__name__}: {exc}")
 
     try:
         from letta.settings import model_settings
 
         if model_settings.openai_api_key:
             return model_settings.openai_api_key
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"Failed to read configured OpenAI API key for compact mode: {type(exc).__name__}: {exc}")
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if api_key:

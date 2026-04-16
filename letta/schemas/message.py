@@ -103,7 +103,7 @@ def tool_return_to_text(func_response: Optional[Union[str, List]]) -> Optional[s
     return result if result else None
 
 
-def _extract_compaction_stats_from_summary_metadata(name: Optional[str]) -> Optional[CompactionStats]:
+def extract_compaction_stats_from_summary_metadata(name: Optional[str]) -> Optional[CompactionStats]:
     if not name:
         return None
     try:
@@ -1121,7 +1121,7 @@ class Message(BaseMessage):
             summary = unpack_message(text_content) if text_content else "[Context compacted via OpenAI]"
             compaction_stats = extract_compaction_stats_from_packed_json(text_content) if text_content else None
             if compaction_stats is None:
-                compaction_stats = _extract_compaction_stats_from_summary_metadata(self.name)
+                compaction_stats = extract_compaction_stats_from_summary_metadata(self.name)
 
             if as_user_message:
                 return UserMessage(

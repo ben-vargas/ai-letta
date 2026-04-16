@@ -1,5 +1,6 @@
 """Unit tests for OpenAI native compaction via /v1/responses/compact."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -119,6 +120,36 @@ def test_openai_compaction_summary_serializes_as_compaction_item():
 
     extracted = extract_compaction_stats_from_message(msg)
     assert extracted is not None
+    assert extracted.messages_count_after == 4
+
+
+def test_extract_compaction_stats_from_message_uses_summary_metadata_fallback():
+    msg = Message(
+        role=MessageRole.summary,
+        content=[
+            OpenAICompactionContent(
+                encrypted_content="test-encrypted",
+                compaction_id="cmp-789",
+            )
+        ],
+        name=json.dumps(
+            {
+                "compaction_stats": {
+                    "trigger": "post_step_context_check",
+                    "context_tokens_before": 100,
+                    "context_tokens_after": 40,
+                    "context_window": 1000,
+                    "messages_count_before": 10,
+                    "messages_count_after": 4,
+                }
+            }
+        ),
+        agent_id="agent-1",
+    )
+
+    extracted = extract_compaction_stats_from_message(msg)
+    assert extracted is not None
+    assert extracted.trigger == "post_step_context_check"
     assert extracted.messages_count_after == 4
 
 
