@@ -15,6 +15,7 @@ from letta.schemas.llm_config import LLMConfig
 from letta.schemas.message import Message, MessageCreate
 from letta.schemas.provider_trace import BillingContext
 from letta.schemas.user import User
+from letta.services.summarizer.openai_compact import openai_compact
 from letta.services.summarizer.self_summarizer import self_summarize_all, self_summarize_sliding_window
 from letta.services.summarizer.summarizer_all import summarize_all
 from letta.services.summarizer.summarizer_config import CompactionSettings, get_default_prompt_for_mode, get_default_summarizer_model
@@ -344,6 +345,38 @@ async def compact_messages(
                 billing_context=billing_context,
             )
             summarization_mode_used = "all"
+    elif summarizer_config.mode == "openai_compact":
+        try:
+            summary, compacted_messages = await openai_compact(
+                actor=actor,
+                agent_id=agent_id,
+                agent_llm_config=agent_llm_config,
+                messages=messages,
+                tools=tools,
+                run_id=run_id,
+                step_id=step_id,
+            )
+        except Exception as e:
+            logger.warning(f"OpenAI compact failed with exception: {str(e)}. Falling back to sliding_window mode.")
+            fallback_config = summarizer_config.model_copy(
+                update={
+                    "mode": "sliding_window",
+                    "prompt": get_default_prompt_for_mode("sliding_window"),
+                }
+            )
+            summary, compacted_messages = await summarize_via_sliding_window(
+                actor=actor,
+                llm_config=summarizer_llm_config,
+                agent_llm_config=agent_llm_config,
+                summarizer_config=fallback_config,
+                in_context_messages=messages,
+                agent_id=agent_id,
+                agent_tags=agent_tags,
+                run_id=run_id,
+                step_id=step_id,
+                billing_context=billing_context,
+            )
+            summarization_mode_used = "sliding_window"
     else:
         raise ValueError(f"Invalid summarizer mode: {summarizer_config.mode}")
 
@@ -414,14 +447,55 @@ async def compact_messages(
     # Build compaction stats if we have the before values
     compaction_stats = None
     if trigger and context_tokens_before is not None and messages_count_before is not None:
+        messages_count_after = len(compacted_messages) if summarization_mode_used == "openai_compact" else len(compacted_messages) + 1
         compaction_stats = {
             "trigger": trigger,
             "context_tokens_before": context_tokens_before,
             "context_tokens_after": context_token_estimate,
             "context_window": agent_llm_config.context_window,
             "messages_count_before": messages_count_before,
-            "messages_count_after": len(compacted_messages) + 1,
+            "messages_count_after": messages_count_after,
         }
+
+    if summarization_mode_used == "openai_compact":
+        from letta.schemas.letta_message_content import OpenAICompactionContent
+
+        summary_message_obj = next(
+            (
+                msg
+                for msg in compacted_messages[1:]
+                if msg.role == MessageRole.summary
+                and msg.content
+                and any(isinstance(content, OpenAICompactionContent) for content in msg.content)
+            ),
+            None,
+        )
+        if summary_message_obj is None:
+            raise ValueError("OpenAI compact did not return a summary compaction item.")
+
+        summary_message_str_packed = package_summarize_message_no_counts(
+            summary=summary,
+            timezone=timezone,
+            compaction_stats=compaction_stats,
+            mode=summarization_mode_used,
+        )
+        text_content = next((content for content in summary_message_obj.content if isinstance(content, TextContent)), None)
+        if text_content is not None:
+            text_content.text = summary_message_str_packed
+        else:
+            summary_message_obj.content.insert(0, TextContent(text=summary_message_str_packed))
+
+        if compaction_stats:
+            import json
+
+            summary_message_obj.name = json.dumps({"compaction_stats": compaction_stats})
+
+        return CompactResult(
+            summary_message=summary_message_obj,
+            compacted_messages=compacted_messages,
+            summary_text=summary,
+            context_token_estimate=context_token_estimate,
+        )
 
     # Create the summary message
     summary_message_str_packed = package_summarize_message_no_counts(

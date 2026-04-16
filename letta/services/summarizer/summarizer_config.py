@@ -32,7 +32,9 @@ def get_default_summarizer_model(provider_type: ProviderType | str | None) -> st
     return summarizer_defaults.get(provider_type)
 
 
-def get_default_prompt_for_mode(mode: Literal["all", "sliding_window", "self_compact_all", "self_compact_sliding_window"]) -> str:
+def get_default_prompt_for_mode(
+    mode: Literal["all", "sliding_window", "self_compact_all", "self_compact_sliding_window", "openai_compact"]
+) -> str:
     """Get the default prompt for a given compaction mode.
     Also used in /summarize endpoint if mode is changed and prompt is not explicitly set."""
     if mode == "self_compact_sliding_window":
@@ -41,6 +43,8 @@ def get_default_prompt_for_mode(mode: Literal["all", "sliding_window", "self_com
         return SELF_ALL_PROMPT
     elif mode == "sliding_window":
         return SLIDING_PROMPT
+    elif mode == "openai_compact":
+        return ""
     else:  # all
         return ALL_PROMPT
 
@@ -73,7 +77,7 @@ class CompactionSettings(BaseModel):
         default=50000, description="The maximum length of the summary in characters. If none, no clipping is performed."
     )
 
-    mode: Literal["all", "sliding_window", "self_compact_all", "self_compact_sliding_window"] = Field(
+    mode: Literal["all", "sliding_window", "self_compact_all", "self_compact_sliding_window", "openai_compact"] = Field(
         default="sliding_window", description="The type of summarization technique use."
     )
     sliding_window_percentage: float = Field(

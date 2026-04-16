@@ -29,6 +29,7 @@ from letta.schemas.letta_message import (
     ApprovalReturn,
     AssistantMessage,
     AssistantMessageListResult,
+    CompactionStats,
     HiddenReasoningMessage,
     LettaMessage,
     LettaMessageReturnUnion,
@@ -53,6 +54,7 @@ from letta.schemas.letta_message_content import (
     LettaMessageContentUnion,
     LettaToolReturnContentUnion,
     OmittedReasoningContent,
+    OpenAICompactionContent,
     ReasoningContent,
     RedactedReasoningContent,
     SummarizedReasoningContent,
@@ -99,6 +101,24 @@ def tool_return_to_text(func_response: Optional[Union[str, List]]) -> Optional[s
         placeholder = "[Image omitted]" if image_count == 1 else f"[{image_count} images omitted]"
         result = (result + " " + placeholder) if result else placeholder
     return result if result else None
+
+
+def _extract_compaction_stats_from_summary_metadata(name: Optional[str]) -> Optional[CompactionStats]:
+    if not name:
+        return None
+    try:
+        metadata = json.loads(name)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    raw_stats = metadata.get("compaction_stats")
+    if not raw_stats:
+        return None
+
+    try:
+        return CompactionStats(**raw_stats)
+    except Exception:
+        return None
 
 
 def add_inner_thoughts_to_tool_call(
@@ -1096,6 +1116,35 @@ class Message(BaseMessage):
             as_user_message: If True, return UserMessage for backward compatibility with
                 clients that don't support SummaryMessage. If False, return SummaryMessage.
         """
+        if self.content and any(isinstance(content, OpenAICompactionContent) for content in self.content):
+            text_content = next((content.text for content in self.content if isinstance(content, TextContent)), None)
+            summary = unpack_message(text_content) if text_content else "[Context compacted via OpenAI]"
+            compaction_stats = extract_compaction_stats_from_packed_json(text_content) if text_content else None
+            if compaction_stats is None:
+                compaction_stats = _extract_compaction_stats_from_summary_metadata(self.name)
+
+            if as_user_message:
+                return UserMessage(
+                    id=self.id,
+                    date=self.created_at,
+                    content=summary,
+                    name=None,
+                    otid=self.otid,
+                    sender_id=self.sender_id,
+                    step_id=self.step_id,
+                    is_err=self.is_err,
+                    run_id=self.run_id,
+                )
+            return SummaryMessage(
+                id=self.id,
+                date=self.created_at,
+                summary=summary,
+                otid=self.otid,
+                step_id=self.step_id,
+                run_id=self.run_id,
+                compaction_stats=compaction_stats,
+            )
+
         if self.content and len(self.content) == 1 and isinstance(self.content[0], TextContent):
             text_content = self.content[0].text
         else:
@@ -1394,12 +1443,18 @@ class Message(BaseMessage):
             }
 
         elif self.role == "summary":
-            # Summary messages are converted to user messages (same as current system_alert behavior)
-            assert text_content is not None, vars(self)
-            openai_message = {
-                "content": text_content,
-                "role": "user",
-            }
+            if self.content and any(isinstance(content, OpenAICompactionContent) for content in self.content):
+                openai_message = {
+                    "content": "[Prior conversation context compacted]",
+                    "role": "user",
+                }
+            else:
+                # Summary messages are converted to user messages (same as current system_alert behavior)
+                assert text_content is not None, vars(self)
+                openai_message = {
+                    "content": text_content,
+                    "role": "user",
+                }
 
         elif self.role == "assistant" or self.role == "approval":
             try:
@@ -1585,14 +1640,24 @@ class Message(BaseMessage):
             message_dicts.append(user_dict)
 
         elif self.role == "summary":
-            # Summary messages are converted to user messages (same as current system_alert behavior)
-            assert self.content and len(self.content) == 1 and isinstance(self.content[0], TextContent), vars(self)
-            message_dicts.append(
-                {
-                    "role": "user",
-                    "content": self.content[0].text,
+            compaction_content = next((content for content in (self.content or []) if isinstance(content, OpenAICompactionContent)), None)
+            if compaction_content is not None:
+                compaction_dict = {
+                    "type": "compaction",
+                    "encrypted_content": compaction_content.encrypted_content,
                 }
-            )
+                if compaction_content.compaction_id:
+                    compaction_dict["id"] = compaction_content.compaction_id
+                message_dicts.append(compaction_dict)
+            else:
+                # Summary messages are converted to user messages (same as current system_alert behavior)
+                assert self.content and len(self.content) == 1 and isinstance(self.content[0], TextContent), vars(self)
+                message_dicts.append(
+                    {
+                        "role": "user",
+                        "content": self.content[0].text,
+                    }
+                )
 
         elif self.role == "assistant" or self.role == "approval":
             # Validate that message has content OpenAI Responses API can process
@@ -1615,12 +1680,13 @@ class Message(BaseMessage):
                             }
                         )
                     elif isinstance(content_part, TextContent):
-                        message_dicts.append(
-                            {
-                                "role": "assistant",
-                                "content": content_part.text,
-                            }
-                        )
+                        message_dict = {
+                            "role": "assistant",
+                            "content": content_part.text,
+                        }
+                        if content_part.openai_phase:
+                            message_dict["phase"] = content_part.openai_phase
+                        message_dicts.append(message_dict)
                     # else skip
 
             if self.tool_calls is not None:
@@ -1924,12 +1990,18 @@ class Message(BaseMessage):
                 }
 
         elif self.role == "summary":
-            # Summary messages are converted to user messages (same as current system_alert behavior)
-            assert text_content is not None, vars(self)
-            anthropic_message = {
-                "content": text_content,
-                "role": "user",
-            }
+            if self.content and any(isinstance(content, OpenAICompactionContent) for content in self.content):
+                anthropic_message = {
+                    "content": "[Prior conversation context compacted]",
+                    "role": "user",
+                }
+            else:
+                # Summary messages are converted to user messages (same as current system_alert behavior)
+                assert text_content is not None, vars(self)
+                anthropic_message = {
+                    "content": text_content,
+                    "role": "user",
+                }
 
         elif self.role == "assistant" or self.role == "approval":
             # Validate that message has content Anthropic API can process
@@ -2203,12 +2275,18 @@ class Message(BaseMessage):
             }
 
         elif self.role == "summary":
-            # Summary messages are converted to user messages (same as current system_alert behavior)
-            assert text_content is not None, vars(self)
-            google_ai_message = {
-                "role": "user",
-                "parts": [{"text": text_content}],
-            }
+            if self.content and any(isinstance(content, OpenAICompactionContent) for content in self.content):
+                google_ai_message = {
+                    "role": "user",
+                    "parts": [{"text": "[Prior conversation context compacted]"}],
+                }
+            else:
+                # Summary messages are converted to user messages (same as current system_alert behavior)
+                assert text_content is not None, vars(self)
+                google_ai_message = {
+                    "role": "user",
+                    "parts": [{"text": text_content}],
+                }
 
         elif self.role == "assistant" or self.role == "approval":
             # Validate that message has content Google API can process

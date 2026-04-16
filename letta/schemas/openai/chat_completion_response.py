@@ -63,6 +63,7 @@ class Message(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
     role: str
     function_call: Optional[FunctionCall] = None  # Deprecated
+    openai_phase: Optional[Literal["commentary", "final_answer"]] = None
     reasoning_content: Optional[str] = None  # Used in newer reasoning APIs, e.g. DeepSeek
     reasoning_content_signature: Optional[str] = None  # NOTE: for Anthropic
     redacted_reasoning_content: Optional[str] = None  # NOTE: for Anthropic
@@ -208,6 +209,7 @@ class MessageDelta(BaseModel):
     """
 
     content: Optional[str] = None
+    openai_phase: Optional[Literal["commentary", "final_answer"]] = None
     reasoning_content: Optional[str] = None
     reasoning_content_signature: Optional[str] = None  # NOTE: for Anthropic
     redacted_reasoning_content: Optional[str] = None  # NOTE: for Anthropic

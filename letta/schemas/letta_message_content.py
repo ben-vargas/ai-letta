@@ -16,6 +16,8 @@ class MessageContentType(str, Enum):
     omitted_reasoning = "omitted_reasoning"
     # For OpenAI Responses API
     summarized_reasoning = "summarized_reasoning"
+    # For OpenAI /v1/responses/compact
+    openai_compaction = "openai_compaction"
 
 
 class MessageContent(BaseModel):
@@ -40,6 +42,10 @@ class TextContent(MessageContent):
     text: str = Field(..., description="The text content of the message.")
     signature: Optional[str] = Field(
         default=None, description="Stores a unique identifier for any reasoning associated with this text content."
+    )
+    openai_phase: Optional[Literal["commentary", "final_answer"]] = Field(
+        default=None,
+        description="OpenAI Responses assistant message phase to preserve on follow-up turns.",
     )
 
     def to_text(self) -> str:
@@ -337,6 +343,20 @@ class SummarizedReasoningContent(MessageContent):
             )
 
 
+class OpenAICompactionContent(MessageContent):
+    """Opaque compaction item returned by OpenAI's standalone compact endpoint."""
+
+    type: Literal[MessageContentType.openai_compaction] = Field(
+        default=MessageContentType.openai_compaction,
+        description="Indicates this content is an OpenAI compaction item.",
+    )
+    encrypted_content: str = Field(..., description="Opaque encrypted content returned by the compact endpoint.")
+    compaction_id: Optional[str] = Field(default=None, description="The compact item identifier returned by OpenAI.")
+
+    def to_text(self) -> str:
+        return "[OpenAI compacted context]"
+
+
 LettaMessageContentUnion = Annotated[
     Union[
         TextContent,
@@ -347,6 +367,7 @@ LettaMessageContentUnion = Annotated[
         RedactedReasoningContent,
         OmittedReasoningContent,
         SummarizedReasoningContent,
+        OpenAICompactionContent,
     ],
     Field(discriminator="type"),
 ]
@@ -362,6 +383,8 @@ def create_letta_message_content_union_schema():
             {"$ref": "#/components/schemas/ReasoningContent"},
             {"$ref": "#/components/schemas/RedactedReasoningContent"},
             {"$ref": "#/components/schemas/OmittedReasoningContent"},
+            {"$ref": "#/components/schemas/SummarizedReasoningContent"},
+            {"$ref": "#/components/schemas/OpenAICompactionContent"},
         ],
         "discriminator": {
             "propertyName": "type",
@@ -373,6 +396,8 @@ def create_letta_message_content_union_schema():
                 "reasoning": "#/components/schemas/ReasoningContent",
                 "redacted_reasoning": "#/components/schemas/RedactedReasoningContent",
                 "omitted_reasoning": "#/components/schemas/OmittedReasoningContent",
+                "summarized_reasoning": "#/components/schemas/SummarizedReasoningContent",
+                "openai_compaction": "#/components/schemas/OpenAICompactionContent",
             },
         },
     }

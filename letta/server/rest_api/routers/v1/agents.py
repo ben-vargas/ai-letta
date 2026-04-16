@@ -2450,11 +2450,12 @@ async def summarize_messages(
         existing_summary = None
         for m in in_context_messages:
             if m.role == MessageRole.summary and m.content:
+                summary_text = m.content[0].to_text() if hasattr(m.content[0], "to_text") else None
                 try:
-                    summary_json = json.loads(m.content[0].text)
+                    summary_json = json.loads(summary_text)
                     existing_summary = summary_json.get("message")
-                except (json.JSONDecodeError, IndexError, AttributeError):
-                    existing_summary = m.content[0].text if m.content else None
+                except (TypeError, json.JSONDecodeError, IndexError, AttributeError):
+                    existing_summary = summary_text
                 break
         return CompactionResponse(
             summary=existing_summary,

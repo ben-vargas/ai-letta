@@ -90,7 +90,13 @@ class SimpleLLMRequestAdapter(LettaLLMRequestAdapter):
             orphan_sig = (
                 self.chat_completions_response.choices[0].message.reasoning_content_signature if not self.reasoning_content else None
             )
-            self.content = [TextContent(text=self.chat_completions_response.choices[0].message.content, signature=orphan_sig)]
+            self.content = [
+                TextContent(
+                    text=self.chat_completions_response.choices[0].message.content,
+                    signature=orphan_sig,
+                    openai_phase=self.chat_completions_response.choices[0].message.openai_phase,
+                )
+            ]
         else:
             self.content = None
 

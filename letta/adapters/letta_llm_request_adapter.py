@@ -71,6 +71,7 @@ class LettaLLMRequestAdapter(LettaLLMAdapter):
                 TextContent(
                     text=self.chat_completions_response.choices[0].message.content,
                     signature=self.chat_completions_response.choices[0].message.reasoning_content_signature,
+                    openai_phase=self.chat_completions_response.choices[0].message.openai_phase,
                 )
             ]
         else:

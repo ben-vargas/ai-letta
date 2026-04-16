@@ -882,6 +882,7 @@ class OpenAIClient(LLMClientBase):
             # Extract assistant message text from the outputs list
             outputs = response_data.get("output") or []
             assistant_text_parts = []
+            assistant_phase = None
             reasoning_summary_parts = None
             reasoning_content_signature = None
             tool_calls = None
@@ -899,6 +900,8 @@ class OpenAIClient(LLMClientBase):
             for out in outputs:
                 out_type = (out or {}).get("type")
                 if out_type == "message":
+                    if out.get("role") == "assistant" and out.get("phase") in {"commentary", "final_answer"}:
+                        assistant_phase = out.get("phase")
                     content_list = (out or {}).get("content") or []
                     for part in content_list:
                         if (part or {}).get("type") == "output_text":
@@ -930,6 +933,7 @@ class OpenAIClient(LLMClientBase):
                 message=ChoiceMessage(
                     role="assistant",
                     content=assistant_text or "",
+                    openai_phase=assistant_phase,
                     reasoning_content="\n".join(reasoning_summary_parts) if reasoning_summary_parts else None,
                     reasoning_content_signature=reasoning_content_signature if reasoning_summary_parts else None,
                     redacted_reasoning_content=None,

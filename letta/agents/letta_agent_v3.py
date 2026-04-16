@@ -48,7 +48,13 @@ from letta.schemas.letta_message import (
     SummaryMessage,
     extract_compaction_stats_from_packed_json,
 )
-from letta.schemas.letta_message_content import OmittedReasoningContent, ReasoningContent, RedactedReasoningContent, TextContent
+from letta.schemas.letta_message_content import (
+    OmittedReasoningContent,
+    OpenAICompactionContent,
+    ReasoningContent,
+    RedactedReasoningContent,
+    TextContent,
+)
 from letta.schemas.letta_request import ClientSkillSchema, ClientToolSchema
 from letta.schemas.letta_response import LettaResponse, TurnTokenData
 from letta.schemas.letta_stop_reason import LettaStopReason, StopReasonType
@@ -90,9 +96,25 @@ def extract_compaction_stats_from_message(message: Message) -> CompactionStats |
     """
     try:
         if message.content and len(message.content) == 1:
+            if isinstance(message.content[0], OpenAICompactionContent) and message.name:
+                metadata = json.loads(message.name)
+                raw_stats = metadata.get("compaction_stats")
+                if raw_stats:
+                    return CompactionStats(**raw_stats)
             text_content = message.content[0].text
             return extract_compaction_stats_from_packed_json(text_content)
-    except AttributeError:
+        if message.content and any(isinstance(content, OpenAICompactionContent) for content in message.content):
+            for content in message.content:
+                if isinstance(content, TextContent):
+                    stats = extract_compaction_stats_from_packed_json(content.text)
+                    if stats is not None:
+                        return stats
+            if message.name:
+                metadata = json.loads(message.name)
+                raw_stats = metadata.get("compaction_stats")
+                if raw_stats:
+                    return CompactionStats(**raw_stats)
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
         pass
     return None
 

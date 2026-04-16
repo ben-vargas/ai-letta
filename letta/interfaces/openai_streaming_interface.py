@@ -1091,6 +1091,7 @@ class SimpleOpenAIResponsesStreamingInterface:
                     content.append(
                         TextContent(
                             text=response.content[0].text,
+                            openai_phase=getattr(response, "phase", None),
                         )
                     )
                 elif len(response.content) == 0:
